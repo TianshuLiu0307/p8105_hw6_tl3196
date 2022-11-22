@@ -21,3 +21,121 @@ options(
 scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 ```
+
+## Problem 1
+
+```{r}
+# download data
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+...
+
+## Problem 2
+
+```{r}
+homicide_df = 
+  read_csv("./data/homicide-data.csv") %>% 
+  mutate(
+    city_state = str_c(city, ", ", state), 
+    resolved = as.numeric(disposition == "Closed by arrest"),
+    ) %>% 
+  filter(
+    !(city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")),
+    victim_race %in% c("White", "Black")
+  ) %>% 
+  mutate(
+    victim_age = as.numeric(victim_age),
+    victim_race = fct(victim_race)
+  )
+  
+homicide_df
+```
+
+Fit a logistic regression with resolved vs unresolved as the outcome and victim age, sex and race as predictors for the city of Baltimore, MD
+
+```{r}
+# fit logistic regression for Baltimore
+balt_logi_reg = 
+  homicide_df %>% filter(city_state == "Baltimore, MD") %>% 
+  glm(
+  formula = resolved ~ victim_age + victim_sex + victim_race, 
+  data = .,
+  family = binomial()
+) 
+
+summary(balt_logi_reg)
+
+balt_logi_reg %>% broom::tidy()
+```
+
+Obtain the estimate and CI of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed. 
+
+```{r}
+# estimate and CI of the adjusted OR for sex = male in solving homicides 
+balt_logi_reg %>% 
+  broom::tidy() %>% 
+  filter(str_detect(term,"Male")) %>% 
+  mutate(
+    log_or = estimate,
+    adj_or = exp(estimate),
+    adj_or_ci_low = exp(estimate - 1.96 * std.error),
+    adj_or_ci_high = exp(estimate + 1.96 * std.error)
+    ) %>% 
+  select(log_or, adj_or, adj_or_ci_low, adj_or_ci_high)
+```
+
+Iterate each cities in the data set.
+
+```{r}
+homicide_or = 
+  homicide_df %>% 
+  nest(data = -city_state) %>% 
+  mutate(
+    logi_reg = map(.x = data, ~glm(formula = resolved ~ victim_age + victim_sex + victim_race, data = .x, family = binomial())),
+    logi_results = map(logi_reg, broom::tidy)
+  ) %>% 
+  select(-data, -logi_reg) %>% 
+  unnest(logi_results) %>% 
+  filter(str_detect(term,"Male")) %>% 
+  mutate(
+    log_or = estimate,
+    adj_or = exp(estimate),
+    adj_or_ci_low = exp(estimate - 1.96 * std.error),
+    adj_or_ci_high = exp(estimate + 1.96 * std.error)
+    ) %>% 
+  select(city_state, log_or, adj_or, adj_or_ci_low, adj_or_ci_high)
+
+homicide_or
+```
+
+Create a plot that shows the estimated ORs and CIs for each city. 
+
+```{r}
+homicide_or %>% 
+  mutate(
+    city_state = fct_reorder(city_state, adj_or)
+  ) %>% 
+  ggplot(aes(x = city_state, y = adj_or, color = city_state)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = adj_or_ci_low, ymax = adj_or_ci_high)) + 
+  theme(legend.position = "none") + 
+  theme(axis.text.x = element_text(size=6, angle=45, hjust = 1)) + 
+  labs(
+    x = "City & State",
+    y = "Adjusted Odd Ratio",
+    title = "Estimated ORs and CIs Comparing Male to Female Victims"
+  )
+```
+
+## Problem 3
