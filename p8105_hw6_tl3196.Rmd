@@ -6,6 +6,7 @@ output: github_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(modelr)
 knitr::opts_chunk$set(
 	echo = TRUE,
 	warning = FALSE,
@@ -139,3 +140,144 @@ homicide_or %>%
 ```
 
 ## Problem 3
+
+```{r}
+# import data from csv file
+birthweight_df = 
+  read_csv("./data/birthweight.csv") %>% 
+  mutate(
+    babysex = factor(babysex),
+    frace = factor(frace),
+    malform = factor(malform),
+    mrace = factor(mrace)
+  )
+
+# check missing data 
+skimr::skim(birthweight_df)
+
+birthweight_df
+```
+
+```{r}
+# histogram plot for baby weight
+birthweight_df %>% 
+  ggplot(aes(x = bwt)) + 
+  geom_histogram() + 
+  labs(
+    x = "Birthweight",
+    y = "Count",
+    title = "Histogram for Birthweight"
+  )
+```
+
+```{r}
+# boxplot for baby weight
+birthweight_df %>% 
+  ggplot(aes(y = bwt)) + 
+  geom_boxplot() + 
+  labs(
+    y = "Birthweight",
+    title = "Boxplot for Birthweight"
+  )
+```
+
+From the plots, the distribution of `bwt` is almost symmetric and normal. 
+Thus, no transformation is necessary before regression.
+
+Use `LASSO` to select predictors in the hypothesized model.
+
+```{r}
+# LASSO
+# define response variable & potential predictors 
+response <- pull(birthweight_df, bwt)
+predictors <- data.matrix(birthweight_df %>% select(-bwt))
+
+library(glmnet)
+
+# perform cross-validation to find optimal lambda value
+cv_model <- cv.glmnet(predictors, response, alpha = 1)
+
+# find optimal lambda value that minimizes test MSE
+best_lambda <- cv_model$lambda.min
+best_lambda
+
+# produce plot of test MSE by lambda value
+plot(cv_model) 
+
+# find coefficients of best model
+best_model <- glmnet(predictors, response, alpha = 1, lambda = best_lambda)
+coef(best_model)
+```
+
+Remain the predictors in the hypothesized regression model whose coefficients is not zero in the table above.
+
+```{r}
+# hypothesized model
+hypo_model = lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + menarche + mheight + momage + mrace + parity + smoken + wtgain, data = birthweight_df)
+
+# calculate rmse for hypothesized model
+rmse(hypo_model, birthweight_df)
+
+# make a plot of model residuals against fitted values
+birthweight_df %>% 
+  add_predictions(hypo_model) %>% 
+  add_residuals(hypo_model) %>% 
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point(alpha = .3) + 
+  geom_hline(yintercept=0, linetype="dashed", color = "red") + 
+  labs(
+    x = "Fitted Values",
+    y = "Residuals",
+    title = "Residuals vs Fitted Values"
+  )
+```
+
+Compare models using cross validation. 
+
+ 
+ - One using head circumference, length, sex, and all interactions (including the three-way interaction) between these
+
+```{r}
+# split cross validation df
+cv_df = crossv_mc(birthweight_df, 100)
+
+# cross validation 
+cv_df = 
+  cv_df %>% 
+  mutate(
+    train = map(train, as.tibble),
+    test = map(test, as.tibble)
+  ) %>% 
+  mutate(
+    hypo_model = map(.x = train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + frace + gaweeks + menarche + mheight + momage + mrace + parity + smoken + wtgain, data = .x)),
+    main_model = map(.x = train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+    interact_model = map(.x = train, ~lm(bwt ~ babysex + bhead + blength + babysex * bhead + babysex * blength + bhead * blength + babysex * bhead * blength, data = .x))
+  ) %>% 
+  mutate(
+    rmse_hypo = map2_dbl(.x = hypo_model, .y = test, ~rmse(.x, .y)),
+    rmse_main = map2_dbl(.x = main_model, .y = test, ~rmse(.x, .y)),
+    rmse_interact = map2_dbl(.x = interact_model, .y = test, ~rmse(.x, .y))
+  )
+
+cv_df 
+
+# boxplot for 3 models
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_boxplot() + 
+  labs(
+    x = "Models",
+    y = "RMSE",
+    titles = "RMSE Boxplots for Models"
+  )
+```
+
+According to the boxplot, the RMSEs are `hypo < interact < main`. Since lower RMSE indicates a better fit, the hypothesized model selecting predictors based on LASSO has the best fit among all models.
