@@ -1,5 +1,5 @@
 ---
-title: "p8106_hw6_tl3196"
+title: "p8105_hw6_tl3196"
 author: "Tianshu Liu"
 output: github_document
 ---
