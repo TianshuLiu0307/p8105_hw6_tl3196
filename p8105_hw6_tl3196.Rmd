@@ -1,5 +1,5 @@
 ---
-title: "p8106_hw5_tl3196"
+title: "p8106_hw6_tl3196"
 author: "Tianshu Liu"
 output: github_document
 ---
@@ -38,9 +38,34 @@ weather_df =
     tmin = tmin / 10,
     tmax = tmax / 10) %>%
   select(name, id, everything())
+
+weather_df %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::glance)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  ggplot(aes(x = r.squared)) + geom_density()
 ```
 
-...
+
+```{r}
+weather_df %>% 
+  modelr::bootstrap(n = 1000) %>% 
+  mutate(
+    models = map(strap, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::tidy)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results) %>% 
+  select(id = `.id`, term, estimate) %>% 
+  pivot_wider(
+    names_from = term, 
+    values_from = estimate) %>% 
+  rename(beta0 = `(Intercept)`, beta1 = tmin) %>% 
+  mutate(log_b0b1 = log(beta0 * beta1)) %>% 
+  ggplot(aes(x = log_b0b1)) + geom_density()
+```
 
 ## Problem 2
 
@@ -77,7 +102,7 @@ balt_logi_reg =
 
 summary(balt_logi_reg)
 
-balt_logi_reg %>% broom::tidy()
+balt_logi_reg %>% broom::tidy() %>% knitr::kable()
 ```
 
 Obtain the estimate and CI of the adjusted odds ratio for solving homicides comparing male victims to female victims keeping all other variables fixed. 
@@ -93,7 +118,8 @@ balt_logi_reg %>%
     adj_or_ci_low = exp(estimate - 1.96 * std.error),
     adj_or_ci_high = exp(estimate + 1.96 * std.error)
     ) %>% 
-  select(log_or, adj_or, adj_or_ci_low, adj_or_ci_high)
+  select(log_or, adj_or, adj_or_ci_low, adj_or_ci_high) %>% 
+  knitr::kable()
 ```
 
 Iterate each cities in the data set.
@@ -280,4 +306,4 @@ cv_df %>%
   )
 ```
 
-According to the boxplot, the RMSEs are `hypo < interact < main`. Since lower RMSE indicates a better fit, the hypothesized model selecting predictors based on LASSO has the best fit among all models.
+According to the boxplot, the RMSEs are `hypo < interact < main`. Since a lower RMSE indicates a better fit, the hypothesized model selecting predictors based on LASSO has the best fit among all models.
